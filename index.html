@@ -332,6 +332,9 @@ Rules:
 - Do NOT invent or guess text you cannot actually read — if a part is illegible (faded stamp, handwriting, watermark, scanner artifact), write [illegible] instead of random characters.
 - Keep proper names, dates, addresses, and identification/registry numbers unchanged in both sections (just copy them into the translation as-is).
 - Ignore purely decorative marks, background texture, or scanner artifacts — focus only on the meaningful printed/handwritten content.
+- For form-style content (a printed field label followed by its filled-in value, like "Nombre: Emma" or a table cell with a header), output each field on its OWN line using EXACTLY this format: Label | Value
+- For narrative or paragraph content (declarations, certification statements, notes, free-flowing sentences), output normal sentences without any pipe character.
+- Preserve the original top-to-bottom order of sections and fields.
 - Do not add commentary, notes, or explanations outside the two sections above.`;
 
   let response;
@@ -383,6 +386,8 @@ Rules:
 - Preserve the original layout as closely as possible using plain text: keep line breaks, headings, numbered or lettered sections, and any table-like structure.
 - Do NOT translate proper names, dates, addresses, or identification/document/registry numbers — keep them exactly as written in the source.
 - Translate everything else into clear, formal English suitable for official use.
+- For form-style content (a printed field label followed by its filled-in value, or a table cell with a header), output each field on its OWN line using EXACTLY this format: Label | Value
+- For narrative or paragraph content (declarations, certification statements, free-flowing sentences), output normal sentences without any pipe character.
 - Output ONLY the translated text. No preamble, no notes, no explanations, no markdown code fences.
 
 Text to translate:
@@ -443,7 +448,8 @@ function stepReview(){
   }).join('');
   return `
     <h2 style="margin-bottom:8px;">Revise la traducción</h2>
-    <p class="hint" style="margin-bottom:20px;">Borrador generado por IA. Edite el texto en inglés antes de descargar.</p>
+    <p class="hint" style="margin-bottom:8px;">Borrador generado por IA. Edite el texto en inglés antes de descargar.</p>
+    <p class="hint" style="margin-bottom:20px;">Los campos de formulario usan el formato <code>Etiqueta | Valor</code> — así se dibujan como tabla en el PDF final. Si edita, mantenga ese formato en esas líneas.</p>
     ${blocks}
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
       <button class="btn btn-ghost" onclick="step=2;render();">Atrás</button>
@@ -467,6 +473,56 @@ async function translateManual(idx){
   }
 }
 
+function renderTranslatedContent(doc, text, marginX, maxWidth, y){
+  const labelWidth = 170;
+  const valueWidth = maxWidth - labelWidth - 10;
+  const lineH = 14;
+  const rows = (text || "").split("\n");
+  doc.setFontSize(10);
+
+  for (const raw of rows) {
+    const line = raw.trim();
+    if (!line) { y += 6; continue; }
+    if (y > 730) { doc.addPage(); y = 56; }
+
+    const pipeIdx = line.indexOf("|");
+    if (pipeIdx > -1 && pipeIdx < 80) {
+      // Form field: render as a two-column table row with a bottom border.
+      const label = line.slice(0, pipeIdx).trim();
+      const value = line.slice(pipeIdx + 1).trim();
+      doc.setFont("helvetica", "bold"); doc.setTextColor(27, 33, 48);
+      const labelLines = doc.splitTextToSize(label, labelWidth - 8);
+      doc.setFont("helvetica", "normal");
+      const valueLines = doc.splitTextToSize(value, valueWidth - 8);
+      const rowLines = Math.max(labelLines.length, valueLines.length, 1);
+      const rowHeight = rowLines * lineH + 8;
+
+      if (y + rowHeight > 740) { doc.addPage(); y = 56; }
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(27, 33, 48);
+      labelLines.forEach((l, i) => doc.text(l, marginX + 4, y + 12 + i * lineH));
+      doc.setFont("helvetica", "normal");
+      valueLines.forEach((l, i) => doc.text(l, marginX + labelWidth + 8, y + 12 + i * lineH));
+
+      doc.setDrawColor(217, 210, 192);
+      doc.line(marginX, y + rowHeight, marginX + maxWidth, y + rowHeight);
+      doc.line(marginX + labelWidth, y, marginX + labelWidth, y + rowHeight);
+      y += rowHeight;
+    } else {
+      // Narrative paragraph text.
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(27, 33, 48);
+      const lines = doc.splitTextToSize(line, maxWidth);
+      lines.forEach((l) => {
+        if (y > 740) { doc.addPage(); y = 56; }
+        doc.text(l, marginX, y);
+        y += 15;
+      });
+      y += 4;
+    }
+  }
+  return y;
+}
+
 function generatePdf(){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:'pt', format:'letter'});
@@ -482,13 +538,7 @@ function generatePdf(){
     y += 26;
     doc.setDrawColor(217,210,192); doc.line(marginX, y, marginX+maxWidth, y);
     y += 22;
-    doc.setFont("helvetica","normal"); doc.setFontSize(10.5); doc.setTextColor(27,33,48);
-    const lines = doc.splitTextToSize(p.translated || "", maxWidth);
-    lines.forEach(line=>{
-      if(y > 740){ doc.addPage(); y = 56; }
-      doc.text(line, marginX, y);
-      y += 15;
-    });
+    renderTranslatedContent(doc, p.translated || "", marginX, maxWidth, y);
   });
   const fname = (file ? file.name.replace(/\.pdf$/i,'') : 'documento') + '_EN.pdf';
   doc.save(fname);
