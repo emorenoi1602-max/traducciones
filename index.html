@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veritas Traducciones — Traducción de documentos migratorios</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+<style>
+  :root{
+    --navy:#0F1E38; --navy-2:#1B3260; --paper:#F7F4EC; --paper-2:#EFEAE0;
+    --ink:#1B2130; --ink-soft:#4B5468; --gold:#9C7A34; --gold-soft:#C9A968;
+    --line:#D9D2C0; --white:#FFFFFF; --success:#2F6B4F; --success-bg:#E7EFE9;
+    --warn-bg:#F5EFE3; --danger:#8C3B2E;
+    --font-display:Georgia,'Times New Roman',serif;
+    --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:var(--font-body);background:var(--paper);color:var(--ink);line-height:1.5;}
+  h1,h2,h3{font-family:var(--font-display);color:var(--navy);margin:0;}
+  p{margin:0;}
+  button{font-family:var(--font-body);cursor:pointer;}
+  .wrap{max-width:760px;margin:0 auto;padding:0 24px;}
+  header{border-bottom:1px solid var(--line);padding:18px 0;background:var(--white);}
+  .header-row{display:flex;align-items:center;justify-content:space-between;max-width:760px;margin:0 auto;padding:0 24px;}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:19px;color:var(--navy);}
+  .logo .mark{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:13px;}
+  .key-btn{background:none;border:1px solid var(--line);border-radius:4px;padding:7px 12px;font-size:12.5px;color:var(--ink-soft);}
+  .key-btn:hover{border-color:var(--navy);color:var(--navy);}
+
+  .card{background:var(--white);border:1px solid var(--line);border-radius:6px;padding:32px;margin:32px 0;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:4px;font-size:14.5px;font-weight:600;border:1px solid transparent;}
+  .btn-primary{background:var(--navy);color:var(--white);}
+  .btn-primary:disabled{background:#9AA3B4;cursor:not-allowed;}
+  .btn-secondary{background:transparent;color:var(--navy);border-color:var(--navy);}
+  .btn-ghost{background:transparent;color:var(--ink-soft);border-color:var(--line);}
+
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:13.5px;font-weight:600;color:var(--navy);margin-bottom:6px;}
+  .field input, .field select, .field textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:4px;font-family:var(--font-body);font-size:14px;}
+  .field textarea{min-height:110px;}
+  .hint{font-size:12.5px;color:var(--ink-soft);margin-top:6px;}
+  .warn-box{background:var(--warn-bg);border:1px solid var(--gold-soft);border-radius:4px;padding:12px 14px;font-size:13px;color:#6b5320;margin-top:14px;}
+
+  .progress{display:flex;margin-bottom:30px;font-size:11.5px;color:var(--ink-soft);}
+  .progress div{flex:1;text-align:center;position:relative;}
+  .progress div.active{color:var(--navy);font-weight:700;}
+  .progress div.done{color:var(--navy);}
+
+  .dropzone{border:2px dashed var(--line);border-radius:6px;padding:44px 20px;text-align:center;background:var(--paper-2);cursor:pointer;}
+  .dropzone.drag{border-color:var(--gold);background:var(--warn-bg);}
+  .file-card{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--paper-2);}
+  .file-card .fico{width:36px;height:36px;border-radius:4px;background:var(--navy);color:var(--white);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;}
+
+  .spinner{width:48px;height:48px;border-radius:50%;border:3px solid var(--paper-2);border-top-color:var(--navy);margin:0 auto 20px;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .page-block{margin-bottom:26px;}
+  .page-title{font-size:13.5px;font-weight:600;color:var(--navy);margin-bottom:8px;}
+  .review-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .review-pane{border:1px solid var(--line);border-radius:4px;}
+  .review-pane .rp-head{padding:8px 12px;background:var(--paper-2);font-size:12px;font-weight:600;color:var(--navy);border-bottom:1px solid var(--line);}
+  .review-pane .rp-body{padding:12px;font-size:13px;white-space:pre-wrap;color:var(--ink-soft);max-height:260px;overflow-y:auto;}
+  .review-pane textarea{width:100%;border:none;min-height:200px;font-size:13px;padding:12px;}
+  .review-pane textarea:focus{outline:none;}
+  @media(max-width:640px){.review-split{grid-template-columns:1fr;}}
+
+  .error-box{background:#F7E9E6;border:1px solid #E3B7AC;color:var(--danger);border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:16px;}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,30,56,0.5);display:flex;align-items:center;justify-content:center;z-index:100;}
+  .modal{background:var(--white);border-radius:8px;padding:32px;max-width:460px;width:90%;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row">
+    <div class="logo"><span class="mark">V</span>Veritas Traducciones</div>
+    <button class="key-btn" onclick="openKeyModal()">Clave de API</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="app"></div>
+</div>
+
+<div id="modal-root"></div>
+
+<script>
+/* =========================================================
+   API key — pedida una sola vez, guardada solo en este
+   navegador (localStorage). Nunca se sube al repositorio.
+   ========================================================= */
+const KEY_STORAGE = "veritas_anthropic_key";
+function getApiKey(){ return localStorage.getItem(KEY_STORAGE) || ""; }
+function setApiKey(k){ localStorage.setItem(KEY_STORAGE, k.trim()); }
+function clearApiKey(){ localStorage.removeItem(KEY_STORAGE); }
+
+function openKeyModal(){
+  const root = document.getElementById('modal-root');
+  const current = getApiKey();
+  root.innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) closeModal()">
+      <div class="modal">
+        <h3 style="margin-bottom:10px;">Clave de API de Anthropic</h3>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px;">
+          Se guarda solo en este navegador (localStorage), nunca en el código ni en GitHub.
+          Consíguela en <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.
+        </p>
+        <div class="field">
+          <input type="password" id="api-key-input" placeholder="sk-ant-..." value="${current}">
+        </div>
+        <div class="warn-box">
+          ⚠ Cualquiera con acceso a este navegador podría ver la clave guardada. Te recomendamos
+          poner un límite de gasto mensual a esta clave en la consola de Anthropic.
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:20px;">
+          <button class="btn btn-ghost" onclick="clearApiKey();closeModal();render();">Borrar clave</button>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="saveKeyFromModal()">Guardar</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+function closeModal(){ document.getElementById('modal-root').innerHTML = ""; }
+function saveKeyFromModal(){
+  const val = document.getElementById('api-key-input').value.trim();
+  if(!val){ return; }
+  setApiKey(val);
+  closeModal();
+  render();
+}
+
+/* =========================================================
+   Wizard state
+   ========================================================= */
+const DOC_TYPES = ["Acta de nacimiento","Acta de matrimonio","Acta de divorcio","Certificado de antecedentes","Certificado de defunción","Documentos escolares","Documentos médicos","Documentos notariales","Cartas","Declaraciones juradas","Documentos de inmigración","Contratos","Otros"];
+const STEP_LABELS = ["Subir","Detalles","Traducción","Revisión","Descarga"];
+let step = 1;
+let file = null;
+let docType = DOC_TYPES[0];
+let pages = [];
+let stageText = "";
+let error = "";
+
+function render(){
+  const app = document.getElementById('app');
+  if(!getApiKey()){
+    app.innerHTML = setupScreenHTML();
+    return;
+  }
+  app.innerHTML = `
+    <div class="progress">${STEP_LABELS.map((l,i)=>`<div class="${i+1<step?'done':(i+1===step?'active':'')}">${i+1}. ${l}</div>`).join('')}</div>
+    ${error ? `<div class="error-box">${error}</div>` : ''}
+    <div class="card">${stepHTML()}</div>
+  `;
+  if(step===1) setupDropzone();
+}
+
+function setupScreenHTML(){
+  return `
+    <div class="card" style="text-align:center;">
+      <h2 style="margin-bottom:10px;">Bienvenido</h2>
+      <p style="color:var(--ink-soft);margin-bottom:20px;">
+        Para traducir documentos necesitas configurar tu clave de la API de Anthropic
+        (se guarda solo en este navegador).
+      </p>
+      <button class="btn btn-primary" onclick="openKeyModal()">Configurar clave de API</button>
+    </div>`;
+}
+
+function stepHTML(){
+  if(step===1) return stepUpload();
+  if(step===2) return stepDetails();
+  if(step===3){ setTimeout(runProcessing, 50); return stepProcessing(); }
+  if(step===4) return stepReview();
+  if(step===5) return stepDone();
+  return "";
+}
+
+function stepUpload(){
+  if(file){
+    return `
+      <h2 style="margin-bottom:8px;">Subir documento</h2>
+      <p class="hint" style="margin-bottom:16px;">Cargue el PDF que desea traducir.</p>
+      <div class="file-card">
+        <div class="fico">PDF</div>
+        <div style="flex:1;"><div style="font-weight:600;">${file.name}</div><div class="hint">${(file.size/1024).toFixed(0)} KB</div></div>
+        <button class="btn btn-ghost" onclick="file=null;render();">Eliminar</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+        <button class="btn btn-primary" onclick="step=2;render();">Continuar</button>
+      </div>`;
+  }
+  return `
+    <h2 style="margin-bottom:8px;">Subir documento</h2>
+    <p class="hint" style="margin-bottom:16px;">Si el PDF es un escaneo, se aplica OCR automáticamente.</p>
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click();">
+      <p style="font-weight:600;color:var(--navy);margin-bottom:6px;">Arrastra tu PDF aquí</p>
+      <p class="hint">o haz clic para seleccionar</p>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf" style="display:none" onchange="handleFile(event.target.files[0])">`;
+}
+function setupDropzone(){
+  const dz = document.getElementById('dropzone'); if(!dz) return;
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
+  dz.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+}
+function handleFile(f){
+  if(!f) return;
+  if(!/\.pdf$/i.test(f.name)){ alert("Por favor seleccione un archivo PDF."); return; }
+  file = f;
+  render();
+}
+
+function stepDetails(){
+  return `
+    <h2 style="margin-bottom:16px;">Detalles del documento</h2>
+    <div class="field">
+      <label>Tipo de documento</label>
+      <select id="f-doctype">${DOC_TYPES.map(d=>`<option ${d===docType?'selected':''}>${d}</option>`).join('')}</select>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:20px;">
+      <button class="btn btn-ghost" onclick="step=1;render();">Atrás</button>
+      <button class="btn btn-primary" onclick="docType=document.getElementById('f-doctype').value;step=3;error='';render();">Traducir con IA</button>
+    </div>`;
+}
+
+function stepProcessing(){
+  return `
+    <div style="text-align:center;padding:20px 0;">
+      <div class="spinner"></div>
+      <h2 style="margin-bottom:8px;">Traduciendo su documento…</h2>
+      <p class="hint" id="stage-text">${stageText}</p>
+    </div>`;
+}
+
+async function runProcessing(){
+  if(window.__processing) return;
+  window.__processing = true;
+  try{
+    setStage("Leyendo el PDF…");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+
+    setStage("Extrayendo texto por página…");
+    const rawPages = [];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      let text = '';
+      for(const item of content.items){ text += item.str; text += item.hasEOL ? '\n' : ' '; }
+      rawPages.push(text.trim());
+    }
+
+    const ocrIndices = rawPages.map((t,i)=> t.length<5 ? i : null).filter(x=>x!==null);
+    const sourceMap = {};
+    for(const idx of ocrIndices){
+      setStage(`Aplicando OCR — página ${idx+1}…`);
+      try{
+        const page = await pdf.getPage(idx+1);
+        const viewport = page.getViewport({scale:2.0});
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({canvasContext:canvas.getContext('2d'), viewport}).promise;
+        const result = await Tesseract.recognize(canvas, 'spa');
+        const text = result?.data?.text?.trim() || '';
+        if(text.length>=3){ rawPages[idx] = text; sourceMap[idx]='ocr'; }
+      } catch(e){ /* falls back to manual */ }
+    }
+
+    setStage("Traduciendo con IA (Español → Inglés)…");
+    const finalPages = [];
+    for(let i=0;i<rawPages.length;i++){
+      const original = rawPages[i];
+      const needsManual = original.trim().length < 3;
+      let translated = '';
+      if(!needsManual){
+        setStage(`Traduciendo página ${i+1} de ${rawPages.length}…`);
+        translated = await translateText(original, i+1, rawPages.length, docType);
+      }
+      finalPages.push({index:i, original, translated, needsManual, source: needsManual?'manual':(sourceMap[i]==='ocr'?'ocr':'digital')});
+    }
+
+    pages = finalPages;
+    step = 4;
+    window.__processing = false;
+    render();
+  } catch(err){
+    window.__processing = false;
+    error = (err && err.message) ? err.message : String(err);
+    step = 2;
+    render();
+  }
+}
+function setStage(text){
+  stageText = text;
+  const el = document.getElementById('stage-text');
+  if(el) el.textContent = text;
+}
+
+async function translateText(text, pageNum, totalPages, docType){
+  const apiKey = getApiKey();
+  const prompt = `You are a professional legal/immigration document translator. Translate the following Spanish document text into English. This is page ${pageNum} of ${totalPages} of a "${docType}" type document.
+
+Rules:
+- Preserve the original layout as closely as possible using plain text: keep line breaks, headings, numbered or lettered sections, and any table-like structure.
+- Do NOT translate proper names, dates, addresses, or identification/document/registry numbers — keep them exactly as written in the source.
+- Translate everything else into clear, formal English suitable for official use.
+- Output ONLY the translated text. No preamble, no notes, no explanations, no markdown code fences.
+
+Text to translate:
+"""
+${text.slice(0,6000)}
+"""`;
+  let response;
+  try{
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "x-api-key": apiKey,
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"
+      },
+      body: JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:1500,
+        messages:[{role:"user", content:prompt}]
+      })
+    });
+  } catch(netErr){
+    throw new Error("No se pudo conectar con la API de Anthropic — " + (netErr.message||netErr));
+  }
+  if(!response.ok){
+    let detail = '';
+    try{ const j = await response.json(); detail = j?.error?.message || ''; }catch(e){}
+    if(response.status===401) detail = "Clave de API inválida o vencida. Revísala con el botón 'Clave de API'.";
+    throw new Error(`Error de la API (HTTP ${response.status}) en la página ${pageNum}: ${detail}`);
+  }
+  const data = await response.json();
+  return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+}
+
+function stepReview(){
+  let blocks = pages.map(p=>{
+    if(p.needsManual){
+      return `
+        <div class="page-block">
+          <div class="page-title">Página ${p.index+1}</div>
+          <p class="hint" style="margin-bottom:8px;">No se detectó texto. Pegue el texto original:</p>
+          <textarea id="manual-${p.index}" style="width:100%;min-height:130px;border:1px solid var(--line);border-radius:4px;padding:10px;"></textarea>
+          <button class="btn btn-secondary" style="margin-top:8px;" onclick="translateManual(${p.index})">Traducir este texto</button>
+          <div id="manual-result-${p.index}" style="margin-top:10px;"></div>
+        </div>`;
+    }
+    const ocrNote = p.source==='ocr' ? `<div class="warn-box" style="margin:0 0 10px;">⚠ Texto detectado por OCR — revise con cuidado</div>` : '';
+    return `
+      <div class="page-block">
+        <div class="page-title">Página ${p.index+1}</div>
+        ${ocrNote}
+        <div class="review-split">
+          <div class="review-pane"><div class="rp-head">Original</div><div class="rp-body">${escapeHtml(p.original)}</div></div>
+          <div class="review-pane"><div class="rp-head">Traducción (editable)</div><textarea id="trans-${p.index}" oninput="pages[${p.index}].translated=this.value">${escapeHtml(p.translated)}</textarea></div>
+        </div>
+      </div>`;
+  }).join('');
+  return `
+    <h2 style="margin-bottom:8px;">Revise la traducción</h2>
+    <p class="hint" style="margin-bottom:20px;">Borrador generado por IA. Edite el texto en inglés antes de descargar.</p>
+    ${blocks}
+    <div style="display:flex;justify-content:space-between;margin-top:10px;">
+      <button class="btn btn-ghost" onclick="step=2;render();">Atrás</button>
+      <button class="btn btn-primary" onclick="generatePdf()">Generar y descargar PDF</button>
+    </div>`;
+}
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function translateManual(idx){
+  const ta = document.getElementById('manual-'+idx);
+  const text = ta.value.trim();
+  const slot = document.getElementById('manual-result-'+idx);
+  if(!text) return;
+  slot.innerHTML = `<p class="hint">Traduciendo…</p>`;
+  try{
+    const translated = await translateText(text, idx+1, pages.length, docType);
+    pages[idx].original = text; pages[idx].translated = translated; pages[idx].needsManual = false; pages[idx].source='manual';
+    render();
+  } catch(err){
+    slot.innerHTML = `<div class="error-box">${err.message||err}</div>`;
+  }
+}
+
+function generatePdf(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'pt', format:'letter'});
+  const marginX = 56, maxWidth = 500;
+  pages.forEach((p, idx)=>{
+    if(idx>0) doc.addPage();
+    let y = 56;
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(156,122,52);
+    doc.text("BORRADOR — TRADUCCIÓN GENERADA POR IA", marginX, y);
+    y += 22;
+    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(15,30,56);
+    doc.text(docType + " — Traducción Español → Inglés", marginX, y, {maxWidth});
+    y += 26;
+    doc.setDrawColor(217,210,192); doc.line(marginX, y, marginX+maxWidth, y);
+    y += 22;
+    doc.setFont("helvetica","normal"); doc.setFontSize(10.5); doc.setTextColor(27,33,48);
+    const lines = doc.splitTextToSize(p.translated || "", maxWidth);
+    lines.forEach(line=>{
+      if(y > 740){ doc.addPage(); y = 56; }
+      doc.text(line, marginX, y);
+      y += 15;
+    });
+  });
+  const fname = (file ? file.name.replace(/\.pdf$/i,'') : 'documento') + '_EN.pdf';
+  doc.save(fname);
+  step = 5;
+  render();
+}
+
+function stepDone(){
+  return `
+    <div style="text-align:center;padding:20px 0;">
+      <div style="width:56px;height:56px;border-radius:50%;background:var(--success-bg);color:var(--success);display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 16px;">✓</div>
+      <h2 style="margin-bottom:8px;">Listo</h2>
+      <p class="hint" style="margin-bottom:20px;">Su documento traducido se descargó.</p>
+      <button class="btn btn-primary" onclick="resetAll();">Traducir otro documento</button>
+    </div>`;
+}
+function resetAll(){
+  step=1; file=null; docType=DOC_TYPES[0]; pages=[]; stageText=''; error='';
+  render();
+}
+
+render();
+</script>
+</body>
+</html>
