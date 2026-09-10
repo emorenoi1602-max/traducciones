@@ -143,6 +143,7 @@ let docType = DOC_TYPES[0];
 let pages = [];
 let stageText = "";
 let error = "";
+let generating = false;
 
 function render(){
   const app = document.getElementById('app');
@@ -453,7 +454,7 @@ function stepReview(){
     ${blocks}
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
       <button class="btn btn-ghost" onclick="step=2;render();">Atrás</button>
-      <button class="btn btn-primary" onclick="generatePdf()">Generar y descargar PDF</button>
+      <button class="btn btn-primary" ${generating ? 'disabled' : ''} onclick="generatePdf()">${generating ? 'Generando diseño profesional…' : 'Generar y descargar PDF'}</button>
     </div>`;
 }
 function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -471,6 +472,149 @@ async function translateManual(idx){
   } catch(err){
     slot.innerHTML = `<div class="error-box">${err.message||err}</div>`;
   }
+}
+
+async function structureTranslatedPage(translatedText, docTypeLabel){
+  const apiKey = getApiKey();
+  const prompt = `You will organize an already-translated English document into a structured JSON layout for a professional certified-translation PDF that mimics the visual style of an official government civil registry form (boxed grid, grey section headers, label-above-value cells).
+
+Document type: "${docTypeLabel}"
+
+Input text (already translated to English; form fields use "Label | Value", narrative text is plain sentences):
+"""
+${translatedText}
+"""
+
+Return ONLY a valid JSON object (no markdown fences, no commentary, nothing before or after) with this exact shape:
+{
+  "title": "document title in English, e.g. BIRTH CIVIL REGISTRY",
+  "header_boxes": [ {"label":"...", "value":"..."} ],
+  "sections": [
+    {
+      "heading": "section name, e.g. Registrant's data",
+      "rows": [
+        [ {"label":"...", "value":"..."} , {"label":"...", "value":"..."} ]
+      ]
+    }
+  ],
+  "footer_note": "certification / legal disclaimer paragraph text, or empty string if none",
+  "signature_block": {"name":"signer name if present, else empty string", "title":"signer title if present, else empty string"}
+}
+
+Rules:
+- Use the EXACT label and value text from the input — do not translate again, do not invent content.
+- header_boxes is for short key facts meant to sit in a top strip (like a serial or verification number) — use an empty array if there are none.
+- Keep the original top-to-bottom order of fields.
+- Group short related fields (like Year / Month / Day, or Type / Number) on the same row (1 to 4 cells); put long fields (full names, addresses, free text) alone on their own row.
+- If a value is blank/empty/dashes in the source, keep it as an empty string "".
+- Every field from the input must appear somewhere in the output.`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "x-api-key": apiKey,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({
+      model:"claude-sonnet-4-6",
+      max_tokens:2000,
+      messages:[{role:"user", content:prompt}]
+    })
+  });
+  if(!response.ok){
+    throw new Error(`Error al estructurar el documento (HTTP ${response.status})`);
+  }
+  const data = await response.json();
+  let text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  text = text.replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
+  return JSON.parse(text);
+}
+
+function renderFormTemplate(doc, data, marginX, maxWidth, y){
+  const grey = [239,234,224], navy = [15,30,56], goldline = [217,210,192];
+
+  if(data.header_boxes && data.header_boxes.length){
+    const n = data.header_boxes.length;
+    const gap = 4;
+    const boxW = (maxWidth - gap*(n-1)) / n;
+    const boxH = 40;
+    data.header_boxes.forEach((b,i)=>{
+      const bx = marginX + i*(boxW+gap);
+      doc.setFillColor(grey[0],grey[1],grey[2]); doc.rect(bx, y, boxW, boxH, 'F');
+      doc.setDrawColor(goldline[0],goldline[1],goldline[2]); doc.rect(bx, y, boxW, boxH);
+      doc.setFont("helvetica","normal"); doc.setFontSize(7); doc.setTextColor(100,100,100);
+      doc.text(String(b.label||""), bx+5, y+12, {maxWidth: boxW-10});
+      doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(navy[0],navy[1],navy[2]);
+      doc.text(String(b.value||""), bx+5, y+27, {maxWidth: boxW-10});
+    });
+    y += boxH + 16;
+  }
+
+  if(data.title){
+    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(navy[0],navy[1],navy[2]);
+    doc.text(String(data.title), marginX + maxWidth/2, y, {align:'center'});
+    y += 20;
+  }
+
+  (data.sections||[]).forEach(section=>{
+    if(y > 700){ doc.addPage(); y = 56; }
+    if(section.heading){
+      doc.setFillColor(grey[0],grey[1],grey[2]);
+      doc.rect(marginX, y, maxWidth, 15, 'F');
+      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(80,80,80);
+      doc.text(String(section.heading).toUpperCase(), marginX+5, y+10.5);
+      y += 15;
+    }
+    (section.rows||[]).forEach(row=>{
+      const cells = (row||[]).filter(c=>c);
+      if(!cells.length) return;
+      const cellW = maxWidth / cells.length;
+      doc.setFontSize(9.5);
+      let maxLines = 1;
+      const wrapped = cells.map(c=>{
+        const w = doc.splitTextToSize(String(c.value||""), cellW-10);
+        maxLines = Math.max(maxLines, w.length);
+        return w;
+      });
+      const rowH = 14 + maxLines*12 + 4;
+      if(y + rowH > 745){ doc.addPage(); y = 56; }
+      cells.forEach((c,i)=>{
+        const cx = marginX + i*cellW;
+        doc.setDrawColor(goldline[0],goldline[1],goldline[2]);
+        doc.rect(cx, y, cellW, rowH);
+        doc.setFont("helvetica","italic"); doc.setFontSize(6.5); doc.setTextColor(120,120,120);
+        doc.text(String(c.label||""), cx+4, y+9, {maxWidth:cellW-8});
+        doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(navy[0],navy[1],navy[2]);
+        wrapped[i].forEach((line,li)=> doc.text(line, cx+4, y+20+li*12, {maxWidth:cellW-8}));
+      });
+      y += rowH;
+    });
+    y += 5;
+  });
+
+  if(data.footer_note){
+    if(y > 670){ doc.addPage(); y = 56; }
+    doc.setFontSize(7.5);
+    const lines = doc.splitTextToSize(String(data.footer_note), maxWidth-16);
+    const boxH = lines.length*10 + 14;
+    doc.setFillColor(grey[0],grey[1],grey[2]); doc.rect(marginX, y, maxWidth, boxH, 'F');
+    doc.setFont("helvetica","normal"); doc.setTextColor(70,70,70);
+    lines.forEach((l,i)=> doc.text(l, marginX+8, y+12+i*10, {maxWidth:maxWidth-16}));
+    y += boxH + 14;
+  }
+
+  if(data.signature_block && ((data.signature_block.name||"").trim() || (data.signature_block.title||"").trim())){
+    if(y > 720){ doc.addPage(); y = 56; }
+    doc.setFont("helvetica","bold"); doc.setFontSize(10); doc.setTextColor(navy[0],navy[1],navy[2]);
+    if(data.signature_block.name) doc.text(String(data.signature_block.name), marginX, y);
+    y += 13;
+    doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(80,80,80);
+    if(data.signature_block.title) doc.text(String(data.signature_block.title), marginX, y);
+    y += 14;
+  }
+  return y;
 }
 
 function renderTranslatedContent(doc, text, marginX, maxWidth, y){
@@ -523,27 +667,47 @@ function renderTranslatedContent(doc, text, marginX, maxWidth, y){
   return y;
 }
 
-function generatePdf(){
+async function generatePdf(){
+  generating = true;
+  render();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:'pt', format:'letter'});
   const marginX = 56, maxWidth = 500;
-  pages.forEach((p, idx)=>{
-    if(idx>0) doc.addPage();
-    let y = 56;
-    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(156,122,52);
-    doc.text("BORRADOR — TRADUCCIÓN GENERADA POR IA", marginX, y);
-    y += 22;
-    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(15,30,56);
-    doc.text(docType + " — Traducción Español → Inglés", marginX, y, {maxWidth});
-    y += 26;
-    doc.setDrawColor(217,210,192); doc.line(marginX, y, marginX+maxWidth, y);
-    y += 22;
-    renderTranslatedContent(doc, p.translated || "", marginX, maxWidth, y);
-  });
-  const fname = (file ? file.name.replace(/\.pdf$/i,'') : 'documento') + '_EN.pdf';
-  doc.save(fname);
-  step = 5;
-  render();
+  try{
+    for(let idx=0; idx<pages.length; idx++){
+      const p = pages[idx];
+      if(idx>0) doc.addPage();
+      let y = 56;
+      doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(156,122,52);
+      doc.text("BORRADOR — TRADUCCIÓN GENERADA POR IA", marginX, y);
+      y += 20;
+      doc.setDrawColor(217,210,192); doc.line(marginX, y, marginX+maxWidth, y);
+      y += 16;
+
+      let structured = null;
+      try{
+        structured = await structureTranslatedPage(p.translated || "", docType);
+      } catch(e){ structured = null; }
+
+      if(structured && (structured.sections || structured.header_boxes)){
+        renderFormTemplate(doc, structured, marginX, maxWidth, y);
+      } else {
+        doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(15,30,56);
+        doc.text(docType + " — Traducción Español → Inglés", marginX, y, {maxWidth});
+        y += 20;
+        renderTranslatedContent(doc, p.translated || "", marginX, maxWidth, y);
+      }
+    }
+    const fname = (file ? file.name.replace(/\.pdf$/i,'') : 'documento') + '_EN.pdf';
+    doc.save(fname);
+    generating = false;
+    step = 5;
+    render();
+  } catch(err){
+    generating = false;
+    error = (err && err.message) ? err.message : String(err);
+    render();
+  }
 }
 
 function stepDone(){
