@@ -6,7 +6,6 @@
 <title>Veritas Traducciones — Traducción de documentos migratorios</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
 <style>
   :root{
     --navy:#0F1E38; --navy-2:#1B3260; --paper:#F7F4EC; --paper-2:#EFEAE0;
@@ -259,31 +258,33 @@ async function runProcessing(){
 
     const ocrIndices = rawPages.map((t,i)=> t.length<5 ? i : null).filter(x=>x!==null);
     const sourceMap = {};
+    const visionTranslations = {};
     for(const idx of ocrIndices){
-      setStage(`Aplicando OCR — página ${idx+1}…`);
+      setStage(`Leyendo y traduciendo con IA (imagen) — página ${idx+1}…`);
       try{
-        const page = await pdf.getPage(idx+1);
-        const viewport = page.getViewport({scale:2.0});
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width; canvas.height = viewport.height;
-        await page.render({canvasContext:canvas.getContext('2d'), viewport}).promise;
-        const result = await Tesseract.recognize(canvas, 'spa');
-        const text = result?.data?.text?.trim() || '';
-        if(text.length>=3){ rawPages[idx] = text; sourceMap[idx]='ocr'; }
-      } catch(e){ /* falls back to manual */ }
+        const base64 = await renderPageToBase64(pdf, idx);
+        const result = await translateImagePage(base64, idx+1, rawPages.length, docType);
+        if(result.translated && result.translated.length>=3){
+          rawPages[idx] = result.original || '(transcripción no disponible)';
+          visionTranslations[idx] = result.translated;
+          sourceMap[idx] = 'vision';
+        }
+      } catch(e){ /* falls back to manual below */ }
     }
 
     setStage("Traduciendo con IA (Español → Inglés)…");
     const finalPages = [];
     for(let i=0;i<rawPages.length;i++){
       const original = rawPages[i];
-      const needsManual = original.trim().length < 3;
+      const needsManual = original.trim().length < 3 && !visionTranslations[i];
       let translated = '';
-      if(!needsManual){
+      if(visionTranslations[i]){
+        translated = visionTranslations[i];
+      } else if(!needsManual){
         setStage(`Traduciendo página ${i+1} de ${rawPages.length}…`);
         translated = await translateText(original, i+1, rawPages.length, docType);
       }
-      finalPages.push({index:i, original, translated, needsManual, source: needsManual?'manual':(sourceMap[i]==='ocr'?'ocr':'digital')});
+      finalPages.push({index:i, original, translated, needsManual, source: needsManual?'manual':(sourceMap[i]||'digital')});
     }
 
     pages = finalPages;
@@ -301,6 +302,77 @@ function setStage(text){
   stageText = text;
   const el = document.getElementById('stage-text');
   if(el) el.textContent = text;
+}
+
+async function renderPageToBase64(pdf, pageIndex, maxDim){
+  maxDim = maxDim || 1568;
+  const page = await pdf.getPage(pageIndex+1);
+  const baseViewport = page.getViewport({scale:1});
+  const scale = Math.min(2.5, maxDim / Math.max(baseViewport.width, baseViewport.height));
+  const viewport = page.getViewport({scale: scale > 0 ? scale : 1});
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  await page.render({canvasContext:ctx, viewport}).promise;
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
+async function translateImagePage(base64Image, pageNum, totalPages, docType){
+  const apiKey = getApiKey();
+  const prompt = `This is page ${pageNum} of ${totalPages} of a scanned Spanish "${docType}" civil/legal document (image attached). It may contain printed form fields, stamps, tables, checkboxes and official seals.
+
+Read the document carefully and respond in EXACTLY this format, with nothing else before or after:
+
+===ORIGINAL===
+<a faithful plain-text transcription of the Spanish content, preserving the logical structure of the form — field labels and their values, sections, tables represented as simple rows>
+===TRANSLATION===
+<the same content translated into clear, formal English, in the same structure>
+
+Rules:
+- Do NOT invent or guess text you cannot actually read — if a part is illegible (faded stamp, handwriting, watermark, scanner artifact), write [illegible] instead of random characters.
+- Keep proper names, dates, addresses, and identification/registry numbers unchanged in both sections (just copy them into the translation as-is).
+- Ignore purely decorative marks, background texture, or scanner artifacts — focus only on the meaningful printed/handwritten content.
+- Do not add commentary, notes, or explanations outside the two sections above.`;
+
+  let response;
+  try{
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "x-api-key": apiKey,
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"
+      },
+      body: JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:2000,
+        messages:[{
+          role:"user",
+          content:[
+            {type:"image", source:{type:"base64", media_type:"image/png", data: base64Image}},
+            {type:"text", text: prompt}
+          ]
+        }]
+      })
+    });
+  } catch(netErr){
+    throw new Error("No se pudo conectar con la API de Anthropic — " + (netErr.message||netErr));
+  }
+  if(!response.ok){
+    let detail = '';
+    try{ const j = await response.json(); detail = j?.error?.message || ''; }catch(e){}
+    if(response.status===401) detail = "Clave de API inválida o vencida. Revísala con el botón 'Clave de API'.";
+    throw new Error(`Error de la API (HTTP ${response.status}) en la página ${pageNum}: ${detail}`);
+  }
+  const data = await response.json();
+  const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  const origMatch = text.match(/===ORIGINAL===([\s\S]*?)===TRANSLATION===/);
+  const transMatch = text.match(/===TRANSLATION===([\s\S]*)$/);
+  return {
+    original: origMatch ? origMatch[1].trim() : text,
+    translated: transMatch ? transMatch[1].trim() : ''
+  };
 }
 
 async function translateText(text, pageNum, totalPages, docType){
@@ -358,11 +430,11 @@ function stepReview(){
           <div id="manual-result-${p.index}" style="margin-top:10px;"></div>
         </div>`;
     }
-    const ocrNote = p.source==='ocr' ? `<div class="warn-box" style="margin:0 0 10px;">⚠ Texto detectado por OCR — revise con cuidado</div>` : '';
+    const visionNote = p.source==='vision' ? `<div class="warn-box" style="margin:0 0 10px;">⚠ Texto leído por IA a partir de la imagen escaneada — revise con cuidado, especialmente nombres, fechas y números</div>` : '';
     return `
       <div class="page-block">
         <div class="page-title">Página ${p.index+1}</div>
-        ${ocrNote}
+        ${visionNote}
         <div class="review-split">
           <div class="review-pane"><div class="rp-head">Original</div><div class="rp-body">${escapeHtml(p.original)}</div></div>
           <div class="review-pane"><div class="rp-head">Traducción (editable)</div><textarea id="trans-${p.index}" oninput="pages[${p.index}].translated=this.value">${escapeHtml(p.translated)}</textarea></div>
